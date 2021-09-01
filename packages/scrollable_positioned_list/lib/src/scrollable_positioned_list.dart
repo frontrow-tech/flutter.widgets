@@ -49,9 +49,11 @@ class ScrollablePositionedList extends StatefulWidget {
     this.addSemanticIndexes = true,
     this.addAutomaticKeepAlives = true,
     this.addRepaintBoundaries = true,
+    this.retainLastSpace = false,
     this.minCacheExtent,
   })  : assert(itemCount != null),
         assert(itemBuilder != null),
+        assert(retainLastSpace != null),
         itemPositionsNotifier = itemPositionsListener,
         separatorBuilder = null,
         super(key: key);
@@ -75,9 +77,11 @@ class ScrollablePositionedList extends StatefulWidget {
     this.addSemanticIndexes = true,
     this.addAutomaticKeepAlives = true,
     this.addRepaintBoundaries = true,
+    this.retainLastSpace = false,
     this.minCacheExtent,
   })  : assert(itemCount != null),
         assert(itemBuilder != null),
+        assert(retainLastSpace != null),
         assert(separatorBuilder != null),
         itemPositionsNotifier = itemPositionsListener,
         super(key: key);
@@ -159,6 +163,9 @@ class ScrollablePositionedList extends StatefulWidget {
   /// in builds of widgets that would otherwise already be built in the
   /// cache extent.
   final double minCacheExtent;
+
+  /// none
+  final bool retainLastSpace;
 
   @override
   State<StatefulWidget> createState() => _ScrollablePositionedListState();
@@ -247,7 +254,7 @@ class ItemScrollController {
 class _ScrollablePositionedListState extends State<ScrollablePositionedList>
     with TickerProviderStateMixin {
   /// Details for the primary (active) [ListView].
-  var primary = _ListDisplayDetails(const ValueKey('Ping'));
+  _ListDisplayDetails primary = _ListDisplayDetails(const ValueKey('Ping'));
 
   /// Details for the secondary (transitional) [ListView] that is temporarily
   /// shown when scrolling a long distance.
@@ -345,6 +352,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
                       itemPositionsNotifier: primary.itemPositionsNotifier,
                       scrollDirection: widget.scrollDirection,
                       reverse: widget.reverse,
+                      retainLastSpace: widget.retainLastSpace,
                       cacheExtent: cacheExtent,
                       alignment: primary.alignment,
                       physics: widget.physics,
@@ -374,6 +382,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
                         controller: secondary.scrollController,
                         scrollDirection: widget.scrollDirection,
                         reverse: widget.reverse,
+                        retainLastSpace: widget.retainLastSpace,
                         cacheExtent: cacheExtent,
                         alignment: secondary.alignment,
                         physics: widget.physics,
@@ -403,11 +412,38 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
     if (index > widget.itemCount - 1) {
       index = widget.itemCount - 1;
     }
-    setState(() {
+    /*setState(() {
       primary.scrollController.jumpTo(0);
       primary.target = index;
       primary.alignment = alignment;
     });
+
+    primary.target = index;
+    primary.alignment = alignment;*/
+
+    //bug 修改
+    final itemPosition = primary.itemPositionsNotifier.itemPositions.value
+        .firstWhere((ItemPosition itemPosition) => itemPosition.index == index,
+            orElse: () => null);
+    if (itemPosition != null) {
+      // Scroll directly.
+      final localScrollAmount = itemPosition.itemLeadingEdge *
+          primary.scrollController.position.viewportDimension;
+
+      //修改bug
+      final double maxScrollExtent = primary.scrollController.position.maxScrollExtent;
+      double needScrollPosition = primary.scrollController.offset +
+          localScrollAmount -
+          alignment * primary.scrollController.position.viewportDimension;
+      //needScrollPosition = needScrollPosition.clamp(0, maxScrollExtent);
+      if (needScrollPosition < 0) {
+        needScrollPosition = 0;
+      } else if (needScrollPosition > maxScrollExtent){
+        needScrollPosition = maxScrollExtent;
+      }
+
+      primary.scrollController.jumpTo(needScrollPosition);
+    }
   }
 
   Future<void> _scrollTo({
@@ -457,12 +493,22 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
       // Scroll directly.
       final localScrollAmount = itemPosition.itemLeadingEdge *
           primary.scrollController.position.viewportDimension;
-      await primary.scrollController.animateTo(
-          primary.scrollController.offset +
-              localScrollAmount -
-              alignment * primary.scrollController.position.viewportDimension,
-          duration: duration,
-          curve: curve);
+
+      //修改bug
+      final double maxScrollExtent = primary.scrollController.position.maxScrollExtent;
+      double needScrollPosition = primary.scrollController.offset +
+          localScrollAmount -
+          alignment * primary.scrollController.position.viewportDimension;
+
+      //needScrollPosition = needScrollPosition.clamp(0.0, maxScrollExtent);
+      if (needScrollPosition < 0) {
+        needScrollPosition = 0;
+      } else if (needScrollPosition > maxScrollExtent){
+        needScrollPosition = maxScrollExtent;
+      }
+
+      await primary.scrollController
+          .animateTo(needScrollPosition, duration: duration, curve: curve);
     } else {
       final scrollAmount = _screenScrollCount *
           primary.scrollController.position.viewportDimension;
@@ -474,16 +520,36 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
 
           opacity.parent = _opacityAnimation(opacityAnimationWeights).animate(
               AnimationController(vsync: this, duration: duration)..forward());
-          secondary.scrollController.jumpTo(-direction *
+
+          //修改bug
+          final double maxScrollExtent =
+              primary.scrollController.position.maxScrollExtent;
+          double needJumpPosition = -direction *
               (_screenScrollCount *
                       primary.scrollController.position.viewportDimension -
                   alignment *
-                      secondary.scrollController.position.viewportDimension));
+                      secondary.scrollController.position.viewportDimension);
 
-          startCompleter.complete(primary.scrollController.animateTo(
-              primary.scrollController.offset + direction * scrollAmount,
-              duration: duration,
-              curve: curve));
+          //needJumpPosition = needJumpPosition.clamp(0.0, maxScrollExtent);
+          if (needJumpPosition < 0) {
+            needJumpPosition = 0;
+          } else if (needJumpPosition > maxScrollExtent){
+            needJumpPosition = maxScrollExtent;
+          }
+
+          secondary.scrollController.jumpTo(needJumpPosition);
+
+          needJumpPosition =
+              primary.scrollController.offset + direction * scrollAmount;
+          //needJumpPosition = needJumpPosition.clamp(0.0, maxScrollExtent);
+          if (needJumpPosition < 0) {
+            needJumpPosition = 0;
+          } else if (needJumpPosition > maxScrollExtent){
+            needJumpPosition = maxScrollExtent;
+          }
+
+          startCompleter.complete(primary.scrollController
+              .animateTo(needJumpPosition, duration: duration, curve: curve));
           endCompleter.complete(secondary.scrollController
               .animateTo(0, duration: duration, curve: curve));
         });
@@ -562,8 +628,9 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
 class _ListDisplayDetails {
   _ListDisplayDetails(this.key);
 
-  final itemPositionsNotifier = ItemPositionsNotifier();
-  final scrollController = ScrollController(keepScrollOffset: false);
+  final ItemPositionsNotifier itemPositionsNotifier = ItemPositionsNotifier();
+  final ScrollController scrollController =
+      ScrollController(keepScrollOffset: false);
 
   /// The index of the item to scroll to.
   int target = 0;

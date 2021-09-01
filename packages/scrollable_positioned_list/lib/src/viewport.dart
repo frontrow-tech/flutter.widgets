@@ -6,7 +6,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
-import 'package:meta/meta.dart';
 
 /// A render object that is bigger on the inside.
 ///
@@ -19,7 +18,7 @@ class UnboundedViewport extends Viewport {
     AxisDirection axisDirection = AxisDirection.down,
     AxisDirection crossAxisDirection,
     double anchor = 0.0,
-    @required ViewportOffset offset,
+    ViewportOffset offset,
     Key center,
     double cacheExtent,
     List<Widget> slivers = const <Widget>[],
@@ -65,8 +64,8 @@ class UnboundedRenderViewport extends RenderViewport {
   /// Creates a viewport for [RenderSliver] objects.
   UnboundedRenderViewport({
     AxisDirection axisDirection = AxisDirection.down,
-    @required AxisDirection crossAxisDirection,
-    @required ViewportOffset offset,
+    AxisDirection crossAxisDirection,
+    ViewportOffset offset,
     double anchor = 0.0,
     List<RenderSliver> children,
     RenderSliver center,
@@ -232,10 +231,38 @@ class UnboundedRenderViewport extends RenderViewport {
     _maxScrollExtent = 0.0;
     _hasVisualOverflow = false;
 
+    final RenderSliver leadingNegativeChild = childBefore(center);
+    final RenderSliver trailingPositiveChild = childAfter(center);
+    final double leadingOffset = (leadingNegativeChild != null
+        ? leadingNegativeChild.geometry?.scrollExtent ?? 0
+        : 0);
+    final double trailingOffset = (trailingPositiveChild != null
+        ? trailingPositiveChild.geometry?.scrollExtent ?? 0
+        : 0);
+    final double centerBodyOffset =
+        (center != null ? center.geometry?.scrollExtent ?? 0 : 0);
+
     // centerOffset is the offset from the leading edge of the RenderViewport
     // to the zero scroll offset (the line between the forward slivers and the
     // reverse slivers).
-    final double centerOffset = mainAxisExtent * anchor - correctedOffset;
+    double centerOffset = mainAxisExtent * anchor - correctedOffset;
+
+    /// You can uncomment these lines of code to see my workaround
+    // if (leadingOffset + centerBodyOffset + trailingOffset > 0) {
+    //   if (leadingOffset + centerBodyOffset + trailingOffset < mainAxisExtent) {
+    //     centerOffset = math.max(
+    //       leadingOffset,
+    //       mainAxisExtent * anchor - centerBodyOffset - trailingOffset,
+    //     );
+    //   } else {
+    //     centerOffset = centerOffset.clamp(
+    //       mainAxisExtent - centerBodyOffset - trailingOffset,
+    //       leadingOffset +
+    //           (leadingOffset > mainAxisExtent ? mainAxisExtent * anchor : 0),
+    //     );
+    //   }
+    // }
+
     final double reverseDirectionRemainingPaintExtent =
         centerOffset.clamp(0.0, mainAxisExtent);
     final double forwardDirectionRemainingPaintExtent =
@@ -256,8 +283,6 @@ class UnboundedRenderViewport extends RenderViewport {
         centerCacheOffset.clamp(0.0, fullCacheExtent);
     final double forwardDirectionRemainingCacheExtent =
         (fullCacheExtent - centerCacheOffset).clamp(0.0, fullCacheExtent);
-
-    final RenderSliver leadingNegativeChild = childBefore(center);
 
     if (leadingNegativeChild != null) {
       // negative scroll offsets

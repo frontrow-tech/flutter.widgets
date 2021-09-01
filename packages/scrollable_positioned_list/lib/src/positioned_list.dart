@@ -12,6 +12,8 @@ import 'element_registry.dart';
 import 'item_positions_listener.dart';
 import 'item_positions_notifier.dart';
 import 'scroll_view.dart';
+import 'layout_callback_builder.dart';
+import 'ob.dart';
 
 /// A list of widgets similar to [ListView], except scroll control
 /// and position reporting is based on index rather than pixel offset.
@@ -35,6 +37,7 @@ class PositionedList extends StatefulWidget {
     this.alignment = 0,
     this.scrollDirection = Axis.vertical,
     this.reverse = false,
+    this.retainLastSpace = false,
     this.physics,
     this.padding,
     this.cacheExtent,
@@ -43,11 +46,15 @@ class PositionedList extends StatefulWidget {
     this.addRepaintBoundaries = true,
     this.addAutomaticKeepAlives = true,
   })  : assert(itemCount != null),
+        assert(retainLastSpace != null),
         assert(itemBuilder != null),
         assert((positionedIndex == 0) || (positionedIndex < itemCount));
 
   /// Number of items the [itemBuilder] can produce.
   final int itemCount;
+
+  /// none
+  final bool retainLastSpace;
 
   /// Called to build children for the list with
   /// 0 <= index < itemCount.
@@ -150,6 +157,9 @@ class _PositionedListState extends State<PositionedList> {
   void didUpdateWidget(PositionedList oldWidget) {
     super.didUpdateWidget(oldWidget);
     _schedulePositionNotificationUpdate();
+    if (widget.retainLastSpace != oldWidget.retainLastSpace) {
+      setState(() {});
+    }
   }
 
   @override
@@ -231,12 +241,63 @@ class _PositionedListState extends State<PositionedList> {
   }
 
   Widget _buildItem(int index) {
-    return RegisteredElementWidget(
+    final Widget child = RegisteredElementWidget(
       key: ValueKey(index),
       child: widget.addSemanticIndexes
           ? IndexedSemantics(
               index: index, child: widget.itemBuilder(context, index))
           : widget.itemBuilder(context, index),
+    );
+
+    if (!widget.retainLastSpace) return child;
+
+    Widget _alignChild(Observer<double> observer) {
+      return LayoutCallbackBuilder(
+        layoutCallback: (Size childSize) {
+          if (index >= widget.itemCount - 1) {
+            final double viewportDimension =
+                scrollController.position.viewportDimension;
+            final double offset = widget.scrollDirection == Axis.vertical
+                ? viewportDimension - childSize.height
+                : viewportDimension - childSize.width;
+            if (childSize.height < viewportDimension &&
+                observer.value != offset) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                observer.value = offset;
+              });
+            }
+          }
+        },
+        builder: (_, _$) => child,
+      );
+    }
+
+    return ObWidget<double>(
+      builder: (Observer<double> observer) {
+        final Widget fillRect = SizedBox(
+          height: widget.scrollDirection == Axis.vertical ? observer.value : 0,
+          width: widget.scrollDirection == Axis.horizontal ? observer.value : 0,
+        );
+
+        return widget.scrollDirection == Axis.vertical
+            ? Column(
+                children: [
+                  if (widget.reverse)
+                    if (observer.value > 0) fillRect,
+                  _alignChild(observer),
+                  if (!widget.reverse) fillRect,
+                ],
+              )
+            : Row(
+                children: [
+                  if (widget.reverse)
+                    if (observer.value > 0) fillRect,
+                  _alignChild(observer),
+                  if (!widget.reverse) fillRect,
+                ],
+              );
+      },
+      initialValue: 0.0.ob,
     );
   }
 
